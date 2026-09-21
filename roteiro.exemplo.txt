@@ -1,0 +1,3 @@
+Esta é a primeira mensagem
+Esta é a segunda mensagem
+Uma mensagem por linha; linhas em branco são ignoradas

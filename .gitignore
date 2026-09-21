@@ -1,0 +1,18 @@
+# Sessão logada do WhatsApp (dados sensíveis)
+perfil_chrome/
+
+# Conteúdo pessoal e estado local
+roteiro.txt
+progresso.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
