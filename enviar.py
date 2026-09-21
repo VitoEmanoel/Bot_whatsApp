@@ -1,10 +1,12 @@
 """Envia um texto (uma mensagem por linha) pelo WhatsApp Web, devagar e com pausas.
 
 Uso:
-    python enviar.py 5511999999999
+    python enviar.py 5511999999999            # para uma pessoa (DDI + DDD + numero)
+    python enviar.py --grupo "Nome do Grupo"  # para um grupo (nome exato)
 
 Ctrl+C para parar. O progresso fica em progresso.json e a execução continua de onde parou.
 """
+import argparse
 import json
 import random
 import sys
@@ -13,6 +15,7 @@ from datetime import date
 from pathlib import Path
 
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -26,21 +29,30 @@ PERFIL = PASTA / "perfil_chrome"  # guarda o login (QR code só na primeira vez)
 DELAY_MIN, DELAY_MAX = 20, 45          # segundos entre mensagens (aleatório)
 LOTE = 25                              # a cada N mensagens, pausa longa
 PAUSA_LONGA_MIN, PAUSA_LONGA_MAX = 180, 300
-LIMITE_DIARIO = 150
+LIMITE_DIARIO_PADRAO = 150             # vale para a conta inteira, somando todos os destinos
+
+CAIXA_MENSAGEM = 'footer div[contenteditable="true"]'
+CAIXA_BUSCA = '#side div[contenteditable="true"]'
 
 
 def carregar_progresso():
+    """Formato: {"dia": ..., "enviadas_hoje": N, "destinos": {"<destino>": indice}}."""
+    dados = {"dia": str(date.today()), "enviadas_hoje": 0, "destinos": {}}
     if PROGRESSO.exists():
-        dados = json.loads(PROGRESSO.read_text(encoding="utf-8"))
-    else:
-        dados = {"indice": 0, "dia": str(date.today()), "enviadas_hoje": 0}
+        lido = json.loads(PROGRESSO.read_text(encoding="utf-8"))
+        if "destinos" in lido:
+            dados = lido
+        else:  # formato antigo (um único destino, sem nome guardado)
+            dados["dia"] = lido.get("dia", dados["dia"])
+            dados["enviadas_hoje"] = lido.get("enviadas_hoje", 0)
+            dados["destinos"] = {"_legado": lido.get("indice", 0)}
     if dados["dia"] != str(date.today()):
         dados["dia"], dados["enviadas_hoje"] = str(date.today()), 0
     return dados
 
 
 def salvar_progresso(dados):
-    PROGRESSO.write_text(json.dumps(dados), encoding="utf-8")
+    PROGRESSO.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
 
 
 def limpar(texto):
@@ -48,43 +60,93 @@ def limpar(texto):
     return "".join(c for c in texto if ord(c) <= 0xFFFF)
 
 
+def xpath_literal(texto):
+    """Escapa aspas para uso seguro dentro de uma expressão XPath."""
+    if '"' not in texto:
+        return f'"{texto}"'
+    if "'" not in texto:
+        return f"'{texto}'"
+    partes = texto.split('"')
+    return "concat(" + ", '\"', ".join(f'"{p}"' for p in partes) + ")"
+
+
+def abrir_pessoa(driver, numero):
+    driver.get(f"https://web.whatsapp.com/send?phone={numero}")
+    print("Se aparecer o QR code, escaneie com o celular. Aguardando a conversa abrir...")
+    WebDriverWait(driver, 180).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, CAIXA_MENSAGEM))
+    )
+
+
+def abrir_grupo(driver, nome):
+    driver.get("https://web.whatsapp.com/")
+    print("Se aparecer o QR code, escaneie com o celular. Aguardando o WhatsApp carregar...")
+    busca = WebDriverWait(driver, 180).until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, CAIXA_BUSCA))
+    )
+    busca.click()
+    busca.send_keys(limpar(nome))
+
+    # só aceita um resultado cujo título seja exatamente o nome informado
+    resultado = f'//div[@id="pane-side"]//span[@title={xpath_literal(nome)}]'
+    try:
+        alvo = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.XPATH, resultado))
+        )
+    except TimeoutException:
+        sys.exit(f'Grupo "{nome}" não encontrado. Confira o nome exato (maiúsculas e acentos).')
+    alvo.click()
+    WebDriverWait(driver, 30).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, CAIXA_MENSAGEM))
+    )
+
+
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("Uso: python enviar.py <numero com DDI e DDD, ex.: 5511999999999>")
-    numero = sys.argv[1]
+    ap = argparse.ArgumentParser(description="Envia o roteiro.txt pelo WhatsApp Web.")
+    destino = ap.add_mutually_exclusive_group(required=True)
+    destino.add_argument("numero", nargs="?", help="número com DDI e DDD, ex.: 5511999999999")
+    destino.add_argument("--grupo", help="nome exato do grupo")
+    ap.add_argument("--limite", type=int, default=LIMITE_DIARIO_PADRAO,
+                    help=f"máximo de mensagens por dia, somando todos os destinos (padrão {LIMITE_DIARIO_PADRAO})")
+    args = ap.parse_args()
+
+    chave = f"grupo:{args.grupo}" if args.grupo else args.numero
 
     linhas = [l.strip() for l in ROTEIRO.read_text(encoding="utf-8").splitlines() if l.strip()]
     dados = carregar_progresso()
+    if "_legado" in dados["destinos"] and args.numero:  # progresso do formato antigo era de um número
+        dados["destinos"].setdefault(chave, dados["destinos"].pop("_legado"))
+    indice = dados["destinos"].get(chave, 0)
 
     opcoes = webdriver.ChromeOptions()
     opcoes.add_argument(f"--user-data-dir={PERFIL}")
     driver = webdriver.Chrome(options=opcoes)
-    driver.get(f"https://web.whatsapp.com/send?phone={numero}")
-
-    print("Se aparecer o QR code, escaneie com o celular. Aguardando a conversa abrir...")
-    caixa = WebDriverWait(driver, 180).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, 'footer div[contenteditable="true"]'))
-    )
 
     try:
-        while dados["indice"] < len(linhas):
-            if dados["enviadas_hoje"] >= LIMITE_DIARIO:
-                print(f"Limite diário ({LIMITE_DIARIO}) atingido. Rode de novo amanhã.")
+        if args.grupo:
+            abrir_grupo(driver, args.grupo)
+        else:
+            abrir_pessoa(driver, args.numero)
+
+        while indice < len(linhas):
+            if dados["enviadas_hoje"] >= args.limite:
+                print(f"Limite diário ({args.limite}) atingido. Rode de novo amanhã.")
                 break
 
-            texto = limpar(linhas[dados["indice"]])
+            texto = limpar(linhas[indice])
             if texto:
-                caixa = driver.find_element(By.CSS_SELECTOR, 'footer div[contenteditable="true"]')
+                caixa = driver.find_element(By.CSS_SELECTOR, CAIXA_MENSAGEM)
                 caixa.click()
                 caixa.send_keys(texto)
                 caixa.send_keys(Keys.ENTER)
 
-            dados["indice"] += 1
+            indice += 1
             dados["enviadas_hoje"] += 1
+            dados["destinos"][chave] = indice
             salvar_progresso(dados)
-            print(f"[{dados['indice']}/{len(linhas)}] {texto[:60]}")
+            print(f"[{indice}/{len(linhas)}] {texto[:60]}")
 
-            if dados["indice"] % LOTE == 0:
+            if indice % LOTE == 0:
                 pausa = random.uniform(PAUSA_LONGA_MIN, PAUSA_LONGA_MAX)
                 print(f"Pausa longa de {pausa / 60:.1f} min...")
             else:

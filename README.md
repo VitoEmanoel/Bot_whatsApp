@@ -1,6 +1,6 @@
 # Bot WhatsApp
 
-Script em Python que envia um texto pelo **WhatsApp Web**, uma mensagem por linha, de forma lenta e com pausas, para uma única pessoa. Pensado para brincadeiras entre amigos (por exemplo, enviar aos poucos o roteiro de um filme).
+Script em Python que envia um texto pelo **WhatsApp Web**, uma mensagem por linha, de forma lenta e com pausas, para **uma pessoa ou um grupo**. Pensado para brincadeiras entre amigos (por exemplo, enviar aos poucos o roteiro de um filme).
 
 Ele usa Selenium para controlar o Chrome. Não é uma API oficial do WhatsApp.
 
@@ -8,6 +8,7 @@ Ele usa Selenium para controlar o Chrome. Não é uma API oficial do WhatsApp.
 
 - Automatizar o WhatsApp Web **viola os termos de uso** do WhatsApp e pode levar ao **banimento do número**, mesmo indo devagar. Use por sua conta e risco, de preferência com um número secundário.
 - Envie apenas para quem vai **gostar da brincadeira**. Bloqueios e denúncias são o principal motivo de banimento.
+- Em **grupos** o risco é maior (mais gente para denunciar ou silenciar). Avise o grupo antes e considere um limite diário menor (`--limite 50`).
 - Não coloque no roteiro conteúdo protegido por direitos autorais que você não tenha o direito de distribuir.
 
 ## Como funciona
@@ -15,8 +16,8 @@ Ele usa Selenium para controlar o Chrome. Não é uma API oficial do WhatsApp.
 - Lê o `roteiro.txt` e envia cada linha não vazia como uma mensagem.
 - Intervalo **aleatório de 20 a 45 s** entre mensagens.
 - Pausa longa de **3 a 5 min** a cada 25 mensagens.
-- Limite de **150 mensagens por dia**.
-- Salva o progresso em `progresso.json`. Se você parar (Ctrl+C) ou o limite diário for atingido, é só rodar de novo que ele continua de onde parou.
+- Limite de **150 mensagens por dia** (ajustável com `--limite`). O limite vale para a **conta inteira**, somando todos os destinos, porque o risco de banimento é da conta.
+- Salva o progresso em `progresso.json`, separado por destino (cada pessoa ou grupo tem o seu ponto). Se você parar (Ctrl+C) ou o limite diário for atingido, é só rodar de novo com o mesmo destino que ele continua de onde parou.
 - O login fica salvo na pasta `perfil_chrome`, então o QR code só é pedido na primeira vez.
 
 Os valores (intervalos, lote e limite diário) ficam no topo do `enviar.py` e podem ser ajustados.
@@ -81,21 +82,50 @@ Abra o `roteiro.txt` e cole o seu texto: **uma mensagem por linha**. Linhas em b
 
 ## Uso
 
-Informe o número do destinatário com **DDI + DDD + número**, só dígitos, sem `+`, espaços ou traços.
+Você escolhe **um** destino: uma pessoa (pelo número) ou um grupo (pelo nome).
 
-Exemplo: (11) 99999-0000 no Brasil vira `5511999999999`.
+### Para uma pessoa
 
-### Windows
+Informe o número com **DDI + DDD + número**, só dígitos, sem `+`, espaços ou traços. Exemplo: (11) 99999-0000 no Brasil vira `5511999999999`.
+
+Windows:
 
 ```powershell
 python enviar.py 5511999999999
 ```
 
-### Linux
+Linux:
 
 ```bash
 python3 enviar.py 5511999999999
 ```
+
+### Para um grupo
+
+Informe o **nome exato** do grupo (mesmas maiúsculas, acentos e espaços), entre aspas. Sua conta precisa já participar do grupo.
+
+Windows:
+
+```powershell
+python enviar.py --grupo "Nome do Grupo"
+```
+
+Linux:
+
+```bash
+python3 enviar.py --grupo "Nome do Grupo"
+```
+
+O script procura o grupo na busca do WhatsApp Web e só abre um resultado cujo título seja idêntico ao nome informado. Se não achar, ele para com uma mensagem de erro, sem enviar nada.
+
+### Opções
+
+| Opção | Descrição |
+|---|---|
+| `--grupo "Nome"` | Envia para um grupo em vez de uma pessoa |
+| `--limite N` | Máximo de mensagens por dia, somando todos os destinos (padrão 150) |
+
+Exemplo: `python enviar.py --grupo "Amigos" --limite 50`
 
 ### Primeira execução
 
@@ -115,7 +145,7 @@ Nas próximas execuções não é necessário escanear de novo.
 
 ### Continuar depois
 
-Rode o mesmo comando. Ele retoma da próxima mensagem. Se o limite diário (150) foi atingido, o script avisa e você continua no dia seguinte.
+Rode o mesmo comando (mesmo número ou mesmo nome de grupo). Ele retoma da próxima mensagem. Se o limite diário foi atingido, o script avisa e você continua no dia seguinte.
 
 Para **recomeçar do zero**, apague o `progresso.json`.
 
@@ -125,6 +155,7 @@ Para **recomeçar do zero**, apague o `progresso.json`.
 |---|---|
 | `SessionNotCreatedException` / "Chrome failed to start: crashed" | Ficou um Chrome do script aberto usando o `perfil_chrome`. Feche-o (veja abaixo) e rode de novo. |
 | A conversa não abre / timeout | Confira o número (DDI + DDD) e se a pessoa tem WhatsApp. |
+| `Grupo "..." não encontrado` | O nome precisa ser exato e sua conta precisa estar no grupo. Copie o nome do próprio WhatsApp. |
 | Não digita nada | O WhatsApp pode ter mudado o layout do site; o seletor em `enviar.py` precisa de ajuste. |
 | `pip` não é reconhecido (Windows) | Use `python -m pip install -r requirements.txt`. |
 | Pede QR code toda vez | A pasta `perfil_chrome` foi apagada ou está sem permissão de escrita. |
