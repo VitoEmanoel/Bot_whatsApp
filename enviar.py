@@ -11,11 +11,12 @@ import json
 import random
 import sys
 import time
+import unicodedata
 from datetime import date
 from pathlib import Path
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -32,7 +33,8 @@ PAUSA_LONGA_MIN, PAUSA_LONGA_MAX = 180, 300
 LIMITE_DIARIO_PADRAO = 150             # vale para a conta inteira, somando todos os destinos
 
 CAIXA_MENSAGEM = 'footer div[contenteditable="true"]'
-CAIXA_BUSCA = '#side div[contenteditable="true"]'
+# a caixa de busca já foi um div editável e hoje é um input; aceita os dois
+CAIXA_BUSCA = '#side input[role="textbox"], #side input[type="text"], #side div[contenteditable="true"]'
 
 
 def carregar_progresso():
@@ -60,14 +62,19 @@ def limpar(texto):
     return "".join(c for c in texto if ord(c) <= 0xFFFF)
 
 
-def xpath_literal(texto):
-    """Escapa aspas para uso seguro dentro de uma expressão XPath."""
-    if '"' not in texto:
-        return f'"{texto}"'
-    if "'" not in texto:
-        return f"'{texto}'"
-    partes = texto.split('"')
-    return "concat(" + ", '\"', ".join(f'"{p}"' for p in partes) + ")"
+def sem_emoji(texto):
+    """Remove emojis e símbolos invisíveis (seletores de variação, ZWJ) e normaliza os espaços."""
+    manter = []
+    for c in unicodedata.normalize("NFC", texto):  # junta letra + acento em um só caractere
+        if ord(c) > 0xFFFF or unicodedata.category(c) in ("So", "Sk", "Cf", "Cs", "Mn", "Co", "Cn"):
+            continue
+        manter.append(c)
+    return " ".join("".join(manter).split())
+
+
+def normalizar(texto):
+    """Forma usada para comparar nomes de grupo: sem emojis, sem espaços extras, sem caixa."""
+    return sem_emoji(texto).casefold()
 
 
 def abrir_pessoa(driver, numero):
@@ -84,18 +91,56 @@ def abrir_grupo(driver, nome):
     busca = WebDriverWait(driver, 180).until(
         EC.element_to_be_clickable((By.CSS_SELECTOR, CAIXA_BUSCA))
     )
+    termo = sem_emoji(nome)  # o Chrome não digita emojis; a busca do WhatsApp acha pelo resto do nome
+    if not termo:
+        sys.exit("O nome do grupo precisa ter pelo menos uma letra ou número além de emojis.")
     busca.click()
-    busca.send_keys(limpar(nome))
+    busca.send_keys(termo)
 
-    # só aceita um resultado cujo título seja exatamente o nome informado
-    resultado = f'//div[@id="pane-side"]//span[@title={xpath_literal(nome)}]'
-    try:
-        alvo = WebDriverWait(driver, 30).until(
-            EC.element_to_be_clickable((By.XPATH, resultado))
+    # O WhatsApp redesenha a lista enquanto a busca carrega, então os títulos são lidos de uma vez
+    # (um único comando JS) em vez de guardar elementos que podem ficar obsoletos no meio da leitura.
+    def titulos_atuais():
+        return driver.execute_script(
+            "return Array.from(document.querySelectorAll('#pane-side span[title]'))"
+            ".map(e => e.getAttribute('title') || '')"
         )
+
+    # só aceita um resultado cujo título, ignorando emojis e maiúsculas, seja igual ao nome informado
+    alvo = normalizar(nome)
+    try:
+        WebDriverWait(driver, 30).until(lambda d: any(normalizar(t) == alvo for t in titulos_atuais()))
     except TimeoutException:
-        sys.exit(f'Grupo "{nome}" não encontrado. Confira o nome exato (maiúsculas e acentos).')
-    alvo.click()
+        vistos = list(dict.fromkeys(titulos_atuais()))
+        dica = f" Resultados da busca: {vistos[:10]}" if vistos else " A busca não retornou nenhum resultado."
+        sys.exit(f'Grupo "{nome}" não encontrado. Confira o nome (o script ignora emojis e maiúsculas).{dica}')
+
+    for _ in range(5):
+        titulos = titulos_atuais()
+        indices = [i for i, t in enumerate(titulos) if normalizar(t) == alvo]
+        if not indices:
+            time.sleep(0.5)
+            continue
+        distintos = list(dict.fromkeys(titulos[i] for i in indices))
+        if len(distintos) > 1:
+            # grupos diferentes só nos emojis: exige o título idêntico ao informado
+            if nome not in distintos:
+                lista = ", ".join(f'"{t}"' for t in distintos)
+                sys.exit(f"Mais de um grupo combina com esse nome: {lista}. Nada foi enviado.")
+            escolhido = nome
+        else:
+            escolhido = distintos[0]
+        posicao = next(i for i in indices if titulos[i] == escolhido)
+        try:
+            elementos = driver.find_elements(By.CSS_SELECTOR, "#pane-side span[title]")
+            if elementos[posicao].get_attribute("title") != escolhido:
+                raise IndexError  # a lista mudou de ordem; tenta de novo
+            elementos[posicao].click()
+            break
+        except (StaleElementReferenceException, IndexError):
+            time.sleep(0.5)
+    else:
+        sys.exit("A lista de resultados ficou mudando e não consegui abrir o grupo. Tente de novo.")
+
     WebDriverWait(driver, 30).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, CAIXA_MENSAGEM))
     )
