@@ -102,7 +102,9 @@ python3 enviar.py 5511999999999
 
 ### Para um grupo
 
-Informe o **nome exato** do grupo (mesmas maiúsculas, acentos e espaços), entre aspas. Sua conta precisa já participar do grupo.
+Informe o **nome** do grupo entre aspas. Sua conta precisa já participar do grupo.
+
+Na comparação, o script **ignora** emojis, maiúsculas/minúsculas e espaços repetidos ou nas pontas. Portanto, não é preciso digitar o emoji: para um grupo chamado `Amigos 😎`, basta `--grupo "Amigos"`. Por outro lado, **acentos** e **espaços entre as palavras contam**: `Ação` e `Acao` são nomes diferentes, assim como `OsBrabos` e `Os Brabos`.
 
 Windows:
 
@@ -116,7 +118,7 @@ Linux:
 python3 enviar.py --grupo "Nome do Grupo"
 ```
 
-O script procura o grupo na busca do WhatsApp Web e só abre um resultado cujo título seja idêntico ao nome informado. Se não achar, ele para com uma mensagem de erro, sem enviar nada.
+O script procura o grupo na busca do WhatsApp Web e só abre um resultado cujo título combine com o nome informado. Se não achar, ele para com uma mensagem de erro e mostra os resultados que a busca retornou, sem enviar nada. Se houver dois grupos que só se diferenciam pelos emojis (por exemplo `Amigos 😎` e `Amigos 🔥`), ele também para e lista os dois; nesse caso, cole o nome completo com o emoji no comando ou renomeie um dos grupos.
 
 ### Opções
 
@@ -155,7 +157,9 @@ Para **recomeçar do zero**, apague o `progresso.json`.
 |---|---|
 | `SessionNotCreatedException` / "Chrome failed to start: crashed" | Ficou um Chrome do script aberto usando o `perfil_chrome`. Feche-o (veja abaixo) e rode de novo. |
 | A conversa não abre / timeout | Confira o número (DDI + DDD) e se a pessoa tem WhatsApp. |
-| `Grupo "..." não encontrado` | O nome precisa ser exato e sua conta precisa estar no grupo. Copie o nome do próprio WhatsApp. |
+| `Grupo "..." não encontrado` | Confira acentos e espaços entre as palavras (emojis e maiúsculas não importam) e se sua conta está no grupo. O erro mostra os resultados da busca para você comparar. |
+| `Mais de um grupo combina com esse nome` | Há grupos que só diferem nos emojis. Use o nome completo, com o emoji, ou renomeie um deles. |
+| Não encontra a caixa de busca / dá timeout ao carregar | O WhatsApp Web mudou o layout. O seletor `CAIXA_BUSCA` no topo do `enviar.py` precisa de ajuste. |
 | Não digita nada | O WhatsApp pode ter mudado o layout do site; o seletor em `enviar.py` precisa de ajuste. |
 | `pip` não é reconhecido (Windows) | Use `python -m pip install -r requirements.txt`. |
 | Pede QR code toda vez | A pasta `perfil_chrome` foi apagada ou está sem permissão de escrita. |
